@@ -37,7 +37,7 @@ class FreightNetwork:
     def get_outgoing(self, hub): # Takes O(1) time
         return self.adjacency.get(hub, [])
 
-# Determines when a shipment can use a service
+# Determines when a shipment can use a service by sorting the departures by arrival time and returning the first one
 def next_departure(service, ready_time):
     if service.departures is None:
         return ready_time
