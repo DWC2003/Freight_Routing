@@ -1,6 +1,7 @@
 # Main file for running network generation and simulation - David
 
 from generator import *
+from algorithms.dijkstra import *
 
 network = FreightNetwork()
 
@@ -40,5 +41,29 @@ network.add_service(Service(
     departures=None
 ))
 
-print_service(network.get_outgoing("Atlanta"))
-print_service(network.get_outgoing("Nashville"))
+result = time_dependant_dijkstra(
+    network,
+    "Atlanta",
+    "Chicago",
+    0
+)
+
+if result is not None:
+    print("Arrival time:", result["arrival_time"])
+
+    for leg in result["path"]:
+        service = leg["service"]
+
+        print(
+            service.origin,
+            "->",
+            service.destination + " |",
+            service.mode + " |",
+            "Departure:", leg["departure"],
+            "Arrival:", leg["arrival"]
+        )
+else:
+    print("No feasible route found.")
+
+#print_service(network.get_outgoing("Atlanta"))
+#print_service(network.get_outgoing("Nashville"))

@@ -1,6 +1,7 @@
 # Dijkstra's algorithm implementation for network - David
 
 import heapq
+from generator import *
 
 def time_dependant_dijkstra(network, origin, destination, start_time):
     arrival_times = {}
@@ -22,7 +23,7 @@ def time_dependant_dijkstra(network, origin, destination, start_time):
 
         for service in network.get_outgoing(current_hub):
 
-            departure = service.next_departure(current_time)
+            departure = next_departure(service, current_time)
 
             if departure is None:
                 continue
