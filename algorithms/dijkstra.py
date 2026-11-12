@@ -4,11 +4,11 @@ import heapq
 from itertools import count
 from generator import *
 
-class CapacityManager:
+class CapacityManager: # Handles capacity management for services
     def __init__(self):
         self.reserved = {}
 
-    def remaining(self, service, departure):
+    def remaining(self, service, departure): # returns remaining capacity of a service
         if service.departures is None:
             key = (service.service_id, None)
         else:
@@ -34,15 +34,17 @@ class CapacityManager:
 
         return True
 
-def time_dependant_dijkstra(network, origin, destination, start_time, deadline=float("inf"), demand=1, capacity_manager=None):
+def time_dependant_dijkstra(network, origin, destination, start_time, deadline=float("inf"), demand=1, capacity_manager=None, allowed_modes = None):
     if start_time > deadline or demand <= 0:
         return None
 
     # Tracks hub and incoming mode
     start_state = (origin, None)
 
+    # initializes route using starting state and time
     arrival_times = {start_state: start_time}
 
+    # retains route information by storing previous states
     previous = {}
 
     counter = count()
@@ -59,11 +61,14 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
 
         current_hub, previous_mode = state
 
-        if current_hub == destination:
+        if current_hub == destination: # check if we've made it to the destination node
             destination_state = state
             break
 
-        for service in network.get_outgoing(current_hub):
+        for service in network.get_outgoing(current_hub): # checks all outgoing services from the current hub/node
+            if allowed_modes is not None: # make sure that the mode of the service is compatible with the shipment
+                if service.mode not in allowed_modes:
+                    continue
 
             transfer_delay = get_transfer_delays(
                 previous_mode,
@@ -72,7 +77,7 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
 
             ready_time = current_time + transfer_delay
 
-            if capacity_manager is not None:
+            if capacity_manager is not None: # depending on if capacity is a concern, calls different functions for getting next departure
                 departure = next_feasible_departure(
                     service, ready_time, demand, capacity_manager
                 )
@@ -90,6 +95,7 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
             next_state = (service.destination, service.mode)
 
             if new_arrival < arrival_times.get(next_state, float("inf")):
+                # add the next state to the route and record the current state
                 arrival_times[next_state] = new_arrival
 
                 previous[next_state] = (
@@ -106,6 +112,7 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
     path = []
     current = destination_state
 
+    # Rebuilds the route used to get to the destination
     while current != start_state:
         previous_state, service, departure = previous[current]
 
