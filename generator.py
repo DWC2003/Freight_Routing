@@ -4,6 +4,26 @@ from dataclasses import dataclass
 from typing import Optional
 from collections import defaultdict
 
+
+# Time delays when transferring between modes
+TRANSFER_DELAYS = {
+    ("truck", "rail") : 3,
+    ("rail", "truck") : 2,
+    ("truck", "ship"): 4,
+    ("ship", "truck"): 4,
+    ("rail", "ship"): 5,
+    ("ship", "rail"): 5
+}
+
+def get_transfer_delays(old_mode, new_mode):
+    if old_mode is None:
+        return 0
+
+    if old_mode == new_mode:
+        return 0
+
+    return TRANSFER_DELAYS.get((old_mode, new_mode), 0)
+
 # Service class represents a service used to transport shipments
 @dataclass
 class Service:
@@ -44,6 +64,24 @@ def next_departure(service, ready_time):
 
     for departure in sorted(service.departures):
         if departure >= ready_time:
+            return departure
+
+    return None
+
+def next_feasible_departure(service, ready_time, demand, capacity_manager):
+    # continuously available transportation
+    if service.departures is None:
+        if capacity_manager.can_reserve(service, ready_time, demand):
+            return ready_time
+        return None
+
+    #scheduled transportation
+
+    for departure in sorted(service.departures):
+        if departure < ready_time:
+            continue
+
+        if capacity_manager.can_reserve(service, departure, demand):
             return departure
 
     return None
