@@ -2,36 +2,59 @@
 
 import heapq
 from itertools import count
-from generator import *
+from math import isfinite
+from generator import get_transfer_delays, next_departure, next_feasible_departure
 
 class CapacityManager: # Handles capacity management for services
     def __init__(self):
         self.reserved = {}
 
-    def remaining(self, service, departure): # returns remaining capacity of a service
+    @staticmethod
+    def reservation_key(service, departure):
+        # Continuous services share one pool; scheduled services have a
+        # separate pool for each departure, as in the original code.
         if service.departures is None:
-            key = (service.service_id, None)
-        else:
-            key = (service.service_id, departure)
+            return service.service_id, None
+        return service.service_id, departure
 
+    def remaining(self, service, departure): # returns remaining capacity of a service
+        key = self.reservation_key(service, departure)
         used = self.reserved.get(key, 0)
 
         return service.capacity - used
 
     def can_reserve(self, service, departure, demand): # checks whether service has enough capacity
-        return self.remaining(service, departure) >= demand
+        return isfinite(demand) and demand > 0 and self.remaining(service, departure) >= demand
 
     def reserve(self, service, departure, demand): # books capacity once a shipment is assigned
         if not self.can_reserve(service, departure, demand):
             return False
 
-        if service.departures is None:
-            key = (service.service_id, None)
-        else:
-            key = (service.service_id, departure)
-
+        key = self.reservation_key(service, departure)
         self.reserved[key] = self.reserved.get(key, 0) + demand
 
+        return True
+
+    def reserve_route(self, path, demand):
+        """Book a complete route, or leave every reservation unchanged.
+
+        This planner runs sequentially. Service IDs must be unique in the
+        network. An empty path (origin == destination) needs no capacity.
+        """
+        if not isfinite(demand) or demand <= 0:
+            return False
+
+        required = {}
+        for leg in path:
+            service = leg["service"]
+            key = self.reservation_key(service, leg["departure"])
+            required[key] = required.get(key, 0) + demand
+            if self.reserved.get(key, 0) + required[key] > service.capacity:
+                return False
+
+        # Only change reservations after ALL legs have passed the checks.
+        for key, amount in required.items():
+            self.reserved[key] = self.reserved.get(key, 0) + amount
         return True
 
 def time_dependant_dijkstra(network, origin, destination, start_time, deadline=float("inf"), demand=1, capacity_manager=None, allowed_modes = None):
