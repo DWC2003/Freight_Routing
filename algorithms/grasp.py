@@ -82,7 +82,7 @@ def generate_alternative_routes(network, shipment, capacity_manager=None,
 
 def _candidate_quality(route, shipment, weights):
     w = weights if isinstance(weights, ObjectiveWeights) else ObjectiveWeights()
-    metrics = route_metrics(route["path"])
+    metrics = route_metrics(route["path"], start_time=shipment.start_time)
     deadline_penalty = max(0.0, route["arrival_time"] - shipment.deadline)
     return (
         w.cost * metrics["cost"]
