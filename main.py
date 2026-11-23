@@ -5,6 +5,8 @@ from generator import FreightNetwork, Service
 from models.shipment import Shipment
 from algorithms.dijkstra import CapacityManager
 from algorithms.greedy import greedy_assign
+from algorithms.grasp import grasp_assign
+from objective import ObjectiveWeights, weighted_objective
 
 
 def build_demo_network():
@@ -52,8 +54,33 @@ def build_demo_shipments():
 def main():
     network = build_demo_network()
     shipments = build_demo_shipments()
-    capacity = CapacityManager()
-    assignments = greedy_assign(network, shipments, capacity, order="priority")
+    weights = ObjectiveWeights()
+
+    baseline_capacity = CapacityManager()
+    baseline = greedy_assign(
+        network,
+        shipments,
+        baseline_capacity,
+        order="priority"
+    )
+    baseline_score = weighted_objective(baseline, weights)
+
+    optimization = grasp_assign(
+        network,
+        shipments,
+        iterations=50,
+        alpha=0.3,
+        weights=weights,
+        seed=42
+    )
+
+    assignments = optimization["assignments"]
+    capacity = optimization["capacity"]
+
+    print(f"Greedy objective: {baseline_score:.2f}")
+    print(f"GRASP objective: {optimization['objective']:.2f}")
+    print(f"GRASP runtime: {optimization['runtime']:.4f} seconds")
+    print("GRASP metrics:", optimization["metrics"])
 
     for result in assignments:
         shipment = result["shipment"]
