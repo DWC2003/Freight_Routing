@@ -1,8 +1,7 @@
-"""One shipment that must travel together from its origin to its destination."""
-
+"""An indivisible shipment with hard mode restrictions and a soft preference."""
 from dataclasses import dataclass
-from math import isfinite
 from typing import Optional
+from models.common import identifier, integer, mode, number
 
 
 @dataclass
@@ -13,17 +12,20 @@ class Shipment:
     volume: float
     start_time: float
     deadline: float
-    priority: int = 1  # A larger number means a higher priority.
-    allowed_modes: Optional[set[str]] = None  # None allows every mode.
+    priority: int = 1
+    allowed_modes: Optional[set[str]] = None
+    preferred_mode: Optional[str] = None
 
     def __post_init__(self):
-        if not self.shipment_id or not self.origin or not self.destination:
-            raise ValueError("Shipment ID, origin and destination are required.")
-        if not isfinite(self.volume) or self.volume <= 0:
-            raise ValueError("Shipment volume must be a positive finite number.")
-        if not isfinite(self.start_time) or self.start_time < 0:
-            raise ValueError("Start time must be a nonnegative finite number.")
-        if not isfinite(self.deadline) or self.deadline < self.start_time:
-            raise ValueError("Deadline must be finite and at or after start time.")
-        if not isinstance(self.priority, int) or self.priority < 0:
-            raise ValueError("Priority must be a nonnegative integer.")
+        for name in ("shipment_id", "origin", "destination"):
+            identifier(name, getattr(self, name))
+        number("volume", self.volume, positive=True)
+        number("start_time", self.start_time)
+        number("deadline", self.deadline, minimum=self.start_time)
+        integer("priority", self.priority, minimum=0)
+        if self.allowed_modes is not None:
+            if not isinstance(self.allowed_modes, (set, frozenset, list, tuple)):
+                raise TypeError("allowed_modes must be a collection of modes or None.")
+            self.allowed_modes = {mode(value) for value in self.allowed_modes}
+        if self.preferred_mode is not None:
+            self.preferred_mode = mode(self.preferred_mode)

@@ -2,63 +2,102 @@
 
 import heapq
 from itertools import count
-from math import isfinite
-from generator import get_transfer_delays, next_departure, next_feasible_departure
+from math import floor, isfinite, nextafter
+from generator import get_transfer_delays, next_departure, next_feasible_departure, travel_duration
+from models.common import number
 
-class CapacityManager: # Handles capacity management for services
-    def __init__(self):
+class CapacityManager:
+    """Departure throughput per bucket; scheduled capacity per departure."""
+    def __init__(self, bucket_hours=1.0, planning_horizon=336.0):
+        from models.common import number
+        self.bucket_hours = number("bucket_hours", bucket_hours, positive=True)
+        self.planning_horizon = number("planning_horizon", planning_horizon, positive=True)
         self.reserved = {}
 
-    @staticmethod
-    def reservation_key(service, departure):
-        # Continuous services share one pool; scheduled services have a
-        # separate pool for each departure, as in the original code.
+    def bucket_index(self, departure):
+        return floor(nextafter(departure / self.bucket_hours, float("inf")))
+
+    def next_bucket(self, departure):
+        boundary = (self.bucket_index(departure) + 1) * self.bucket_hours
+        return boundary if boundary > departure else nextafter(departure, float("inf"))
+
+    def reservation_key(self, service, departure):
         if service.departures is None:
-            return service.service_id, None
+            return service.service_id, self.bucket_index(departure)
         return service.service_id, departure
 
-    def remaining(self, service, departure): # returns remaining capacity of a service
-        key = self.reservation_key(service, departure)
-        used = self.reserved.get(key, 0)
+    def remaining(self, service, departure):
+        return service.capacity - self.reserved.get(self.reservation_key(service, departure), 0)
 
-        return service.capacity - used
+    def can_reserve(self, service, departure, demand):
+        return (not isinstance(demand, bool) and isfinite(demand) and demand > 0 and isfinite(departure)
+                and 0 <= departure <= self.planning_horizon
+                and (service.departures is None or departure in service.departures)
+                and self.remaining(service, departure) + 1e-9 >= demand)
 
-    def can_reserve(self, service, departure, demand): # checks whether service has enough capacity
-        return isfinite(demand) and demand > 0 and self.remaining(service, departure) >= demand
+    def reserve(self, service, departure, demand):
+        return self.reserve_route([{"service": service, "departure": departure}], demand)
 
-    def reserve(self, service, departure, demand): # books capacity once a shipment is assigned
-        if not self.can_reserve(service, departure, demand):
-            return False
-
-        key = self.reservation_key(service, departure)
-        self.reserved[key] = self.reserved.get(key, 0) + demand
-
-        return True
-
-    def reserve_route(self, path, demand):
-        """Book a complete route, or leave every reservation unchanged.
-
-        This planner runs sequentially. Service IDs must be unique in the
-        network. An empty path (origin == destination) needs no capacity.
-        """
-        if not isfinite(demand) or demand <= 0:
-            return False
-
+    def _requirements(self, path, demand):
+        if isinstance(demand, bool) or not isfinite(demand) or demand <= 0:
+            return None
         required = {}
         for leg in path:
-            service = leg["service"]
-            key = self.reservation_key(service, leg["departure"])
-            required[key] = required.get(key, 0) + demand
-            if self.reserved.get(key, 0) + required[key] > service.capacity:
-                return False
+            service, departure = leg["service"], leg["departure"]
+            if (not isfinite(departure) or not 0 <= departure <= self.planning_horizon
+                    or (service.departures is not None and departure not in service.departures)):
+                return None
+            key = self.reservation_key(service, departure)
+            amount = required.get(key, (0, service.capacity))[0] + demand
+            required[key] = amount, service.capacity
+        return required
 
-        # Only change reservations after ALL legs have passed the checks.
-        for key, amount in required.items():
+    def reserve_route(self, path, demand):
+        required = self._requirements(path, demand)
+        if required is None or any(self.reserved.get(k, 0) + v > cap + 1e-9 for k, (v, cap) in required.items()):
+            return False
+        for key, (amount, _) in required.items():
             self.reserved[key] = self.reserved.get(key, 0) + amount
         return True
 
+    def release_route(self, path, demand):
+        required = self._requirements(path, demand)
+        if required is None or any(self.reserved.get(k, 0) + 1e-9 < v for k, (v, _) in required.items()):
+            return False
+        for key, (amount, _) in required.items():
+            remaining = self.reserved[key] - amount
+            if remaining > 1e-9:
+                self.reserved[key] = remaining
+            else:
+                del self.reserved[key]
+        return True
+
+    def copy(self):
+        other = CapacityManager(self.bucket_hours, self.planning_horizon)
+        other.reserved = dict(self.reserved)
+        return other
+
+
 def time_dependant_dijkstra(network, origin, destination, start_time, deadline=float("inf"), demand=1, capacity_manager=None, allowed_modes = None):
-    if start_time > deadline or demand <= 0:
+    number("start_time", start_time)
+    number("demand", demand, positive=True)
+    if deadline != float("inf"):
+        number("deadline", deadline)
+    deadline = min(deadline, network.planning_horizon)
+    if start_time > deadline:
+        return None
+    if capacity_manager is not None and (
+        capacity_manager.bucket_hours != network.bucket_hours
+        or capacity_manager.planning_horizon != network.planning_horizon
+    ):
+        raise ValueError("Capacity settings must match the network.")
+    if origin not in network.adjacency or destination not in network.adjacency:
+        return None
+
+    # A* pruning with a reusable optimistic static travel-duration bound.
+    # Incoming mode remains part of the state for correct transfer handling.
+    lower_bounds = network.travel_lower_bounds(destination)
+    if start_time + lower_bounds.get(origin, float("inf")) > deadline:
         return None
 
     # Tracks hub and incoming mode
@@ -72,12 +111,12 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
 
     counter = count()
 
-    pq = [(start_time, next(counter) ,start_state)] # Priority queue
+    pq = [(start_time + lower_bounds[origin], next(counter), start_time, start_state)]
 
     destination_state = None
 
     while pq:
-        current_time, _, state = heapq.heappop(pq) # Get item at the front of the queue
+        _, _, current_time, state = heapq.heappop(pq) # Get item at the front of the queue
 
         if current_time > arrival_times[state]: # Ignore hub where current time > arrival times
             continue
@@ -102,7 +141,8 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
 
             if capacity_manager is not None: # depending on if capacity is a concern, calls different functions for getting next departure
                 departure = next_feasible_departure(
-                    service, ready_time, demand, capacity_manager
+                    service, ready_time, demand, capacity_manager,
+                    latest_departure=deadline - service.travel_time
                 )
             else:
                 departure = next_departure(service, ready_time)
@@ -110,9 +150,10 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
             if departure is None:
                 continue
 
-            new_arrival = departure + service.travel_time
+            new_arrival = departure + travel_duration(service, departure)
 
-            if new_arrival > deadline:
+            bound = lower_bounds.get(service.destination, float("inf"))
+            if new_arrival + bound > deadline:
                 continue
 
             next_state = (service.destination, service.mode)
@@ -127,7 +168,7 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
                     departure
                 )
 
-                heapq.heappush(pq, (new_arrival, next(counter), next_state))
+                heapq.heappush(pq, (new_arrival + bound, next(counter), new_arrival, next_state))
 
     if destination_state is None:
         return None
@@ -142,7 +183,7 @@ def time_dependant_dijkstra(network, origin, destination, start_time, deadline=f
         path.append({
             "service": service,
             "departure": departure,
-            "arrival": departure + service.travel_time
+            "arrival": departure + travel_duration(service, departure)
         })
 
         current = previous_state

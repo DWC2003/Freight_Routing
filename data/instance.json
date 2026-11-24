@@ -1,0 +1,11 @@
+{
+  "bucket_hours": 1.0,
+  "planning_horizon": 336.0,
+  "time_unit": "hours",
+  "cost_model": "per_shipment",
+  "time_model": "scheduled_fixed_duration",
+  "metadata": {
+    "seed": 42,
+    "scenario": "feasible"
+  }
+}

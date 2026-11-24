@@ -3,12 +3,9 @@
 
 from generator import FreightNetwork, Service
 from models.shipment import Shipment
-from algorithms.dijkstra import CapacityManager
-from algorithms.greedy import greedy_assign
 from algorithms.grasp import grasp_assign
-from objective import ObjectiveWeights, weighted_objective
 
-
+# left over method for simple demo
 def build_demo_network():
     network = FreightNetwork()
 
@@ -37,7 +34,7 @@ def build_demo_network():
     ))
     return network
 
-
+# left over method for simple demo
 def build_demo_shipments():
     return [
         Shipment(shipment_id="S1", origin="Atlanta", destination="Chicago",
@@ -51,56 +48,70 @@ def build_demo_shipments():
     ]
 
 
-def main():
-    network = build_demo_network()
-    shipments = build_demo_shipments()
-    weights = ObjectiveWeights()
+def main(argv=None):
+    """One command to load/generate an instance, optimize it, and export results."""
+    import argparse
+    from pathlib import Path
+    from dataclasses import asdict
+    from configuration import load_config
+    from instance_generator import generate_instance, stress_instance
+    from project_io import read_instance, write_instance, write_results
+    from feasibility import feasibility_report
+    from objective import normalize_weights
 
-    baseline_capacity = CapacityManager()
-    baseline = greedy_assign(
-        network,
-        shipments,
-        baseline_capacity,
-        order="priority"
-    )
-    baseline_score = weighted_objective(baseline, weights)
-
-    optimization = grasp_assign(
-        network,
-        shipments,
-        iterations=50,
-        alpha=0.3,
-        weights=weights,
-        seed=42
-    )
-
-    assignments = optimization["assignments"]
-    capacity = optimization["capacity"]
-
-    print(f"Greedy objective: {baseline_score:.2f}")
-    print(f"GRASP objective: {optimization['objective']:.2f}")
-    print(f"GRASP runtime: {optimization['runtime']:.4f} seconds")
-    print("GRASP metrics:", optimization["metrics"])
-
-    for result in assignments:
-        shipment = result["shipment"]
-        print(f"\n{shipment.shipment_id} | priority={shipment.priority} | "
-              f"volume={shipment.volume} | {result['status']}")
-
-        if result["status"] != "assigned":
-            print(f"  Reason: {result['reason']}")
-            continue
-
-        route = result["route"]
-        print(f"  Arrival: {route['arrival_time']} | Deadline: {shipment.deadline}")
-        for leg in route["path"]:
-            service = leg["service"]
-            print(f"  {service.origin} -> {service.destination} by {service.mode} "
-                  f"({service.service_id}): {leg['departure']} -> {leg['arrival']}")
-
-    assigned_count = sum(result["status"] == "assigned" for result in assignments)
-    print(f"\nAssigned {assigned_count}/{len(shipments)} shipments.")
-    print("Reserved capacity:", capacity.reserved)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default=str(Path(__file__).with_name("config.json")))
+    parser.add_argument("--demo", action="store_true", help="Run the original four-shipment example")
+    parser.add_argument("--generate-only", action="store_true")
+    parser.add_argument("--input-dir")
+    parser.add_argument("--data-dir")
+    parser.add_argument("--output-dir")
+    parser.add_argument("--hubs", type=int)
+    parser.add_argument("--links", type=int)
+    parser.add_argument("--shipments", type=int)
+    parser.add_argument("--iterations", type=int)
+    parser.add_argument("--max-local-moves", type=int)
+    args = parser.parse_args(argv)
+    mapping = {"hubs": "hub_count", "links": "link_count", "shipments": "shipment_count"}
+    overrides = {mapping.get(k, k): v for k, v in vars(args).items()
+                 if k not in ("config", "demo", "generate_only") and v is not None}
+    config = load_config(args.config, overrides)
+    if args.demo and config["input_dir"] is not None:
+        parser.error("--demo and --input-dir cannot be combined")
+    weights = normalize_weights(config["weights"])
+    config["weights"] = asdict(weights)
+    reference = None
+    if args.demo:
+        network, shipments = build_demo_network(), build_demo_shipments()
+        network.bucket_hours = config["capacity_bucket_hours"]
+        network.planning_horizon = config["planning_horizon"]
+    elif config["input_dir"] is not None:
+        network, shipments = read_instance(config["input_dir"], config["capacity_bucket_hours"],
+                                            config["planning_horizon"])
+    else:
+        names = ("hub_count", "link_count", "shipment_count", "seed", "planning_horizon",
+                 "max_legs", "deadline_slack", "max_attempts_per_shipment")
+        network, shipments, reference = generate_instance(
+            **{name: config[name] for name in names}, bucket_hours=config["capacity_bucket_hours"])
+        if not feasibility_report(network, reference, shipments)["complete"]:
+            raise ValueError("Generated reference plan is invalid.")
+        if config["scenario"] == "stress":
+            network, shipments = stress_instance(network, shipments, config["capacity_factor"], config["deadline_factor"])
+            reference = None
+    if config["input_dir"] is None:
+        write_instance(config["data_dir"], network, shipments, reference,
+                       metadata={"seed": config["seed"], "scenario": "demo" if args.demo else config["scenario"]})
+    if args.generate_only:
+        print(f"Prepared {len(network.adjacency)} hubs, {len(network.services)} links, {len(shipments)} shipments.")
+        return
+    names = ("iterations", "alpha", "seed", "rcl_size", "max_no_improvement", "max_local_moves",
+             "max_routes", "max_route_searches", "max_rebuild_shipments")
+    result = grasp_assign(network, shipments, weights=weights, **{name: config[name] for name in names})
+    write_results(config["output_dir"], network, shipments, result, config)
+    print(f"Assigned {result['metrics']['assigned']}/{len(shipments)} shipments.")
+    print(f"Baseline rank: {result['baseline_rank']} | GRASP rank: {result['rank']}")
+    print(f"Runtime: {result['runtime']:.3f}s | Iterations: {result['iterations']} | {result['stop_reason']}")
+    print(f"Results: {config['output_dir']}")
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ def greedy_assign(network, shipments, capacity_manager=None, order="priority"):
         raise ValueError("Order must be 'priority' or 'input'.")
 
     if capacity_manager is None:
-        capacity_manager = CapacityManager()
+        capacity_manager = network.new_capacity_manager()
 
     assignments = []
     for shipment in ordered:

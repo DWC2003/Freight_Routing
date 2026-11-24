@@ -1,0 +1,33 @@
+{
+  "seed": 42,
+  "hub_count": 500,
+  "link_count": 5000,
+  "shipment_count": 10000,
+  "iterations": 3,
+  "alpha": 0.3,
+  "rcl_size": null,
+  "max_no_improvement": 2,
+  "max_local_moves": 12,
+  "max_routes": 2,
+  "max_route_searches": 4,
+  "max_rebuild_shipments": 8,
+  "capacity_bucket_hours": 1.0,
+  "planning_horizon": 336.0,
+  "max_legs": 4,
+  "deadline_slack": 24.0,
+  "max_attempts_per_shipment": 100,
+  "scenario": "feasible",
+  "capacity_factor": 0.5,
+  "deadline_factor": 0.5,
+  "data_dir": "data",
+  "output_dir": "out",
+  "input_dir": null,
+  "weights": {
+    "cost": 1.0,
+    "travel_time": 10.0,
+    "transfer": 50.0,
+    "emissions": 1.0,
+    "preferred_mode": 25.0,
+    "unassigned_penalty": 1000000.0
+  }
+}
