@@ -29,3 +29,6 @@ class Shipment:
             self.allowed_modes = {mode(value) for value in self.allowed_modes}
         if self.preferred_mode is not None:
             self.preferred_mode = mode(self.preferred_mode)
+
+            if self.allowed_modes is not None and self.preferred_mode not in self.allowed_modes:
+                raise ValueError("preferred_mode must be included in allowed_modes")

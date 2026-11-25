@@ -76,11 +76,30 @@ def generate_instance(hub_count=500, link_count=5000, shipment_count=10000,
             if len(path) != legs:
                 continue
             deadline = min(planning_horizon, ready + rng.uniform(0, deadline_slack))
+
             modes = {leg["service"].mode for leg in path}
-            shipment = Shipment(f"S{index:06d}", origin, hub, volume, start_time, deadline,
-                                priority=rng.randint(1, 3),
-                                allowed_modes=modes if rng.random() < .25 else None,
-                                preferred_mode=rng.choice(MODES) if rng.random() < .4 else None)
+
+            priority = rng.randint(1,3)
+            allowed = modes if rng.random() < .25 else None
+
+            preference_options = (sorted(allowed) if allowed is not None else MODES)
+            preferred = rng.choice(preference_options) if rng.random() < .4 else None
+
+            shipment = Shipment(
+                f"S{index:06d}",
+                origin,
+                hub,
+                volume,
+                start_time,
+                deadline,
+                priority=priority,
+                allowed_modes=allowed,
+                preferred_mode=preferred
+            )
+
+
+
+
             if capacity.reserve_route(path, volume):
                 shipments.append(shipment)
                 reference.append({"shipment": shipment, "status": "assigned",

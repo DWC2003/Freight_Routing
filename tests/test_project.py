@@ -53,7 +53,7 @@ COST_ONLY = ObjectiveWeights(cost=1, travel_time=0, transfer=0, emissions=0, pre
 class ModelTests(unittest.TestCase):
     def test_modes_and_transfer_rules(self):
         self.assertEqual(service(mode="Sea").mode, "ship")
-        self.assertEqual(shipment(allowed_modes={"Rail"}, preferred_mode="SEA").allowed_modes, {"rail"})
+        self.assertEqual(shipment(allowed_modes={"Rail"}, preferred_mode="RAIL").allowed_modes, {"rail"})
         for a in ("truck", "rail", "air", "ship"):
             for b in ("truck", "rail", "air", "ship"):
                 self.assertEqual(get_transfer_delays(a, b) == 0, a == b)
